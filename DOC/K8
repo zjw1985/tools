@@ -1,0 +1,323 @@
+1.准备工作
+1.1 安装 Docker-CE
+1.2 安装 Kubeadm
+1.3 配置 Kubeadm 所用到的镜像
+1.4 关闭 Swap
+1.5 关闭 SELinux
+1.6 配置转发参数
+2.【主机】正式安装 Kuberentes
+2.1 初始化相关镜像
+2.2 配置 kubectl 认证信息
+2.3 安装 Flannel 网络
+3.【Node 节点】配置
+4.Dashboard 配置
+1.准备工作
+万事开头难，本来如果没墙的话就没有这么多破事，首先我们要先配置好安装 Kubernetes 所需要的必备环境，这里我没有采用从零开始安装 Kubernetes 的方式，而是使用了 Kubeadm 来进行 K8S 集群的安装与配置。
+
+1.1 安装 Docker-CE
+关于如何在 CentOS 安装 Docker-CE 的文章大家可以看一下我 这篇文章 ，几分钟的事情就可以安装完毕。
+
+1.2 安装 Kubeadm
+安装 Kubeadm 首先我们要配置好阿里云的国内源，执行如下命令：
+
+cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://mirrors.aliyun.com/kubernetes/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=0
+EOF
+之后呢，执行以下命令来重建 Yum 缓存：
+
+yum -y install epel-release
+yum clean all
+yum makecache
+下面就开始正式安装 Kubeadm 了：
+
+yum -y install kubelet kubeadm kubectl kubernetes-cni
+不出意外的话，安装完成之后，我们执行以下命令来启用 Kubeadm 服务：
+
+systemctl enable kubelet && systemctl start kubelet
+1.3 配置 Kubeadm 所用到的镜像
+这里是重中之重，因为在国内的原因，无法访问到 Google 的镜像库，所以我们需要执行以下脚本来从 Docker Hub 仓库中获取相同的镜像，并且更改 TAG 让其变成与 Google 拉去镜像一致。
+
+新建一个 Shell 脚本，填入以下代码之后保存。
+
+#!/bin/bash
+images=(kube-proxy-amd64:v1.11.0 kube-scheduler-amd64:v1.11.0 kube-controller-manager-amd64:v1.11.0 kube-apiserver-amd64:v1.11.0
+etcd-amd64:3.2.18 coredns:1.1.3 pause-amd64:3.1 kubernetes-dashboard-amd64:v1.8.3 k8s-dns-sidecar-amd64:1.14.9 k8s-dns-kube-dns-amd64:1.14.9
+k8s-dns-dnsmasq-nanny-amd64:1.14.9 )
+for imageName in ${images[@]} ; do
+docker pull keveon/$imageName
+docker tag keveon/$imageName k8s.gcr.io/$imageName
+docker rmi keveon/$imageName
+done
+docker tag da86e6ba6ca1 k8s.gcr.io/pause:3.1
+保存之后记得用 chmod 命令赋予 Shell 脚本可执行权限：
+
+chmod -R 777 ./xxx.sh
+1.4 关闭 Swap
+sudo swapoff -a
+#要永久禁掉swap分区，打开如下文件注释掉swap那一行 
+# sudo vi /etc/fstab
+1.5 关闭 SELinux
+# 临时禁用selinux
+# 永久关闭 修改/etc/sysconfig/selinux文件设置
+sed -i 's/SELINUX=permissive/SELINUX=disabled/' /etc/sysconfig/selinux
+# 这里按回车，下面是第二条命令
+setenforce 0
+1.6 配置转发参数
+# 配置转发相关参数，否则可能会出错
+cat <<EOF > /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+vm.swappiness=0
+EOF
+# 这里按回车，下面是第二条命令
+sysctl --system
+回到顶部
+2.【主机】正式安装 Kuberentes
+如果你做好了准备工作，后面的一切都是小菜一碟。
+
+2.1 初始化相关镜像
+要初始化镜像，请运行以下命令：
+
+kubeadm init --kubernetes-version=v1.11.0 --pod-network-cidr=10.244.0.0/16
+前面是版本号，后面是你 POD 网络的 IP 段。
+
+执行之后，你大概会得到与我相近的输出：
+
+I0712 10:46:30.938979   13461 feature_gate.go:230] feature gates: &{map[]}
+[init] using Kubernetes version: v1.11.0
+[preflight] running pre-flight checks
+I0712 10:46:30.961005   13461 kernel_validator.go:81] Validating kernel version
+I0712 10:46:30.961061   13461 kernel_validator.go:96] Validating kernel config
+    [WARNING SystemVerification]: docker version is greater than the most recently validated version. Docker version: 18.03.1-ce. Max validated version: 17.03
+    [WARNING Hostname]: hostname "g2-apigateway" could not be reached
+    [WARNING Hostname]: hostname "g2-apigateway" lookup g2-apigateway on 100.100.2.138:53: no such host
+[addons] Applied essential addon: CoreDNS
+[addons] Applied essential addon: kube-proxy
+
+Your Kubernetes master has initialized successfully!
+
+To start using your cluster, you need to run the following as a regular user:
+
+  mkdir -p $HOME/.kube
+  sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+  sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+You should now deploy a pod network to the cluster.
+Run "kubectl apply -f [podnetwork].yaml" with one of the options listed at:
+  https://kubernetes.io/docs/concepts/cluster-administration/addons/
+
+You can now join any number of machines by running the following on each node
+as root:
+
+  kubeadm join 172.16.8.62:6443 --token o337m9.ceq32wg9g2gro7gx --discovery-token-ca-cert-hash sha256:e8adc6dc2bbe6bd18569c73e4c0468b4652655e7c5c97209a9ec214beac55ea3
+2.2 配置 kubectl 认证信息
+export KUBECONFIG=/etc/kubernetes/admin.conf
+# 如果你想持久化的话，直接执行以下命令【推荐】
+echo "export KUBECONFIG=/etc/kubernetes/admin.conf" >> ~/.bash_profile
+2.3 安装 Flannel 网络
+请依次执行以下命令：
+
+mkdir -p /etc/cni/net.d/
+cat <<EOF> /etc/cni/net.d/10-flannel.conf
+{
+“name”: “cbr0”,
+“type”: “flannel”,
+“delegate”: {
+“isDefaultGateway”: true
+}
+}
+EOF
+mkdir /usr/share/oci-umount/oci-umount.d -p
+mkdir /run/flannel/
+cat <<EOF> /run/flannel/subnet.env
+FLANNEL_NETWORK=10.244.0.0/16
+FLANNEL_SUBNET=10.244.1.0/24
+FLANNEL_MTU=1450
+FLANNEL_IPMASQ=true
+EOF
+最后，我们需要新建一个 flannel.yml 文件，内容如下：
+
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+ name: flannel
+rules:
+ - apiGroups:
+ - ""
+ resources:
+ - pods
+ verbs:
+ - get
+ - apiGroups:
+ - ""
+ resources:
+ - nodes
+ verbs:
+ - list
+ - watch
+ - apiGroups:
+ - ""
+ resources:
+ - nodes/status
+ verbs:
+ - patch
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+ name: flannel
+roleRef:
+ apiGroup: rbac.authorization.k8s.io
+ kind: ClusterRole
+ name: flannel
+subjects:
+- kind: ServiceAccount
+ name: flannel
+ namespace: kube-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+ name: flannel
+ namespace: kube-system
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+ name: kube-flannel-cfg
+ namespace: kube-system
+ labels:
+ tier: node
+ app: flannel
+data:
+  cni-conf.json: | { "name": "cbr0", "type": "flannel", "delegate": { "isDefaultGateway": true } } net-conf.json: | { "Network": "10.244.0.0/16", "Backend": { "Type": "vxlan" } } --- apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+ name: kube-flannel-ds
+ namespace: kube-system
+ labels:
+ tier: node
+ app: flannel
+spec:
+ template:
+ metadata:
+ labels:
+ tier: node
+ app: flannel
+ spec:
+ hostNetwork: true
+ nodeSelector:
+        beta.kubernetes.io/arch: amd64
+ tolerations:
+ - key: node-role.kubernetes.io/master
+ operator: Exists
+ effect: NoSchedule
+ serviceAccountName: flannel
+ initContainers:
+ - name: install-cni
+ image: quay.io/coreos/flannel:v0.9.1-amd64
+ command:
+ - cp
+ args:
+ - -f
+ - /etc/kube-flannel/cni-conf.json
+ - /etc/cni/net.d/10-flannel.conf
+ volumeMounts:
+ - name: cni
+ mountPath: /etc/cni/net.d
+ - name: flannel-cfg
+ mountPath: /etc/kube-flannel/
+ containers:
+ - name: kube-flannel
+ image: quay.io/coreos/flannel:v0.9.1-amd64
+ command: [ "/opt/bin/flanneld", "--ip-masq", "--kube-subnet-mgr" ]
+ securityContext:
+ privileged: true
+ env:
+ - name: POD_NAME
+ valueFrom:
+ fieldRef:
+ fieldPath: metadata.name
+ - name: POD_NAMESPACE
+ valueFrom:
+ fieldRef:
+ fieldPath: metadata.namespace
+ volumeMounts:
+ - name: run
+ mountPath: /run
+ - name: flannel-cfg
+ mountPath: /etc/kube-flannel/
+ volumes:
+ - name: run
+ hostPath:
+ path: /run
+ - name: cni
+ hostPath:
+ path: /etc/cni/net.d
+ - name: flannel-cfg
+ configMap:
+ name: kube-flannel-cfg
+执行：
+
+kubectl create -f ./flannel.yml
+执行完成之后，我们可以运行一下命令，查看现在的节点信息：
+
+kubectl get nodes
+会得到类似于下面的输出：
+
+NAME               STATUS    ROLES     AGE       VERSION
+g2-master           Ready     master    6m       v1.11.0
+好了，我们主机已经配置完成。
+
+回到顶部
+3.【Node 节点】配置
+Node 节点所需要做的都在 准备工作 里面，做完之后直接执行刚刚主机输出的：
+
+kubeadm join 172.16.8.62:6443 --token o337m9.ceq32wg9g2gro7gx --discovery-token-ca-cert-hash sha256:e8adc6dc2bbe6bd18569c73e4c0468b4652655e7c5c97209a9ec214beac55ea3
+执行完就 OK 了。
+
+然后我们回到 62 主机服务器，我刚刚在两个从属的服务器执行了以上命令，然后运行：
+
+
+得到输出：
+
+NAME               STATUS    ROLES     AGE       VERSION
+g2-master           Ready     master    46m       v1.11.0
+g2-node1            Ready     <none>    41m       v1.11.0
+g2-node2            Ready     <none>    41m       v1.11.0
+回到顶部
+4.Dashboard 配置
+Kuberentes 配置 DashBoard 也不简单，当然你可以使用官方的 dashboard 的 yaml 文件进行部署，也可以使用 Mr.Devin 这位博主所提供的修改版，避免踩坑。
+
+地址在：https://github.com/gh-Devin/kubernetes-dashboard，将这些 Yaml 文件下载下来，在其目录下（注意在 Yaml 文件所在目录），执行以下命令：
+
+kubectl  -n kube-system create -f .
+启动 Dashboard 所需要的所有容器。
+
+访问你 MASTER 主机的 IP:30090，可以看到如下界面：
+
+会发现报错。。。看不到容器，这个时候你需要新建一个 dashboard-admin.yaml 文件，然后填充如下内容：
+
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+ name: kubernetes-dashboard
+ labels:
+ k8s-app: kubernetes-dashboard
+roleRef:
+ apiGroup: rbac.authorization.k8s.io
+ kind: ClusterRole
+ name: cluster-admin
+subjects:
+- kind: ServiceAccount
+ name: kubernetes-dashboard
+ namespace: kube-system
+填好之后呢，执行如下命令启动容器：
+
+kubectl -f ./dashboard-admin.yaml create
+再次访问，正常了。
