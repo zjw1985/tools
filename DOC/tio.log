@@ -1,0 +1,91 @@
+安装istio
+下载安装 helm
+创建helm service account 权限
+安装helm 服务端 tiller :
+使用helm安装istio
+查看istio 安装情况
+安装istio
+curl -L https://git.io/getLatestIstio | sh -
+cd istio-1.0.0/
+ln -s $PWD/bin/istio /usr/bin/
+下载安装 helm
+yum install -y socat
+wget https://storage.googleapis.com/kubernetes-helm/helm-v2.9.1-linux-amd64.tar.gz
+tar zxvf helm-v2.9.1-linux-amd64.tar.gz
+cp linux-amd64/helm /usr/bin
+创建helm service account 权限
+cat <<EOF >  helmserviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tiller
+  namespace: kube-system
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: tiller-clusterrolebinding
+subjects:
+- kind: ServiceAccount
+  name: tiller
+  namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: ""
+EOF
+ 
+kubectl create -f  helmserviceaccount.yaml
+ 
+
+安装helm 服务端 tiller :
+helm init --service-account tiller --upgrade -i registry.cn-hangzhou.aliyuncs.com/google_containers/tiller:v2.9.1 --stable-repo-url https://kubernetes.oss-cn-hangzhou.aliyuncs.com/charts
+helm list
+ 
+
+使用helm安装istio
+helm template install/kubernetes/helm/istio --name istio --namespace istio-system --set gateways.istio-ingressgateway.type=NodePort --set gateways.istio-egressgateway.type=NodePort > $HOME/istio.yaml
+kubectl create namespace istio-system
+kubectl create -f $HOME/istio.yaml
+备注：卸载命令
+
+kubectl delete -f $HOME/istio.yaml
+ 
+
+查看istio 安装情况
+[root@iZ2zegiyyobukerp56ltyqZ work]# kubectl get pod -n istio-system
+ 
+NAME                                        READY     STATUS      RESTARTS   AGE
+ 
+istio-citadel-7d8f9748c5-76spk              1/1       Running     0          2h
+ 
+istio-cleanup-secrets-gqskm                 0/1       Completed   0          2h
+ 
+istio-egressgateway-676c8546c5-njc62        1/1       Running     0          2h
+ 
+istio-galley-5669f7c9b-pqqx4                1/1       Running     0          2h
+ 
+istio-ingressgateway-5475685bbb-mlb2b       1/1       Running     0          2h
+ 
+istio-pilot-5795d6d695-922rh                2/2       Running     0          2h
+ 
+istio-policy-7f945bf487-892zj               2/2       Running     0          2h
+ 
+istio-sidecar-injector-d96cd9459-fmlqf      1/1       Running     0          2h
+ 
+istio-statsd-prom-bridge-549d687fd9-gpcsz   1/1       Running     0          2h
+ 
+istio-telemetry-6c587bdbc4-gfzhm            2/2       Running     0          2h
+ 
+prometheus-6ffc56584f-fm2jd                 1/1       Running     0          2h
+ 
+
+其他命令
+
+# 删除
+kubectl delete namespace istio-system
+ 
+# 查看
+helm ls
+kubectl get pods -n istio-system
+kubectl get svc -n istio-system
