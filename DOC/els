@@ -1,0 +1,39 @@
+private function _getIPMAXESDataPost()
+  {
+    $_str = '{
+      "size":0,
+      "_source": [ "hits.total"],
+      "query":{
+        "bool":{
+          "must":{
+            "match":{
+              "status":200
+            }
+          },
+          "filter":{
+            "range":{
+              "@timestamp":{
+                "gte":"now-1m-%s%s",
+                "lt":"now-1m"
+              }
+            }
+          }
+        }
+      },
+      "sort":{
+        "@timestamp":{
+          "order": "desc"
+        }
+      },
+      "aggs" : {
+        "ip_count": {
+          "terms": {
+            "field": "http_x_forward.keyword",
+            "size": 30,
+            "min_doc_count": %s
+          }
+        }
+      }
+    }';
+    return sprintf($_str, $this->range, $this->range_unit, $this->alarm_num);
+  }
