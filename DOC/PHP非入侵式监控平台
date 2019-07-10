@@ -1,0 +1,164 @@
+基于tideways+xhgui+mongo打造PHP非入侵式监控平台
+
+tideways说明
+git地址：https://github.com/tideways/php-profiler-extension
+
+需要的扩展  mongodb.so , tideways.so
+
+安装步骤
+安装tideways
+git clone https://github.com/tideways/php-profiler-extension.git
+
+unzip php-profiler-extension-master.zip
+
+cd php-profiler-extension-master.zip
+
+/home/work/php70/bin/phpize
+
+./configure –with-php-config=/home/work/php70/bin/php-config
+
+make && make install
+
+vim /home/work/php70/lib/php.ini
+
+在最后 加入
+
+[mongodb]
+extension=mongodb.so
+[tideways]
+extension=tideways.so
+;运行Web请求时避免启动Tideways
+tideways.auto_start=false
+;不需要自动加载，在程序中控制就行
+tideways.auto_prepend_library=0
+;频率设置为100，在程序调用时能改
+tideways.sample_rate=10
+;模式 监控模式 默认BASIC
+tideways.monitor=BASIC
+;模式 跟中模式 默认TRACING
+tideways.collect=PROFILING
+;服务名称
+tideways.service=MYTEST
+;支持的框架
+tideways.framework=laravel
+
+也可以设置在php-fpm中
+
+env[TIDEWAYS_SAMPLERATE]=25
+
+如果只有一个php-fpm池，但多个站点使用，可以设置在nginx的vhost中
+
+location ~ .php$ {
+….
+fastcgi_param TIDEWAYS_SAMPLERATE “25”;
+}
+
+安装mongodb.so
+不过多说明
+
+进入mongo
+
+use xhprof
+db.results.ensureIndex( { ‘meta.SERVER.REQUEST_TIME’ : -1 } )
+db.results.ensureIndex( { ‘profile.main().wt’ : -1 } )
+db.results.ensureIndex( { ‘profile.main().mu’ : -1 } )
+db.results.ensureIndex( { ‘profile.main().cpu’ : -1 } )
+db.results.ensureIndex( { ‘meta.url’ : 1 } )
+
+数据过多删除mongo
+
+use xhprof
+
+db.dropDatabase();
+
+安装xhgui
+用的是一个汉化版分支
+
+git clone https://github.com/laynefyc/xhgui-branch.git
+
+unzip xhgui-branch-master.zip
+
+cd xhgui-branch-master
+
+/home/work/php70/bin/php install.php
+
+修改配置文件
+
+vim config/config.default.php
+
+‘save.handler’ => ‘mongodb’,
+
+‘db.host’ => ‘mongodb://127.0.0.1:27017‘,
+
+‘db.db’ => ‘xhprof’,
+
+在xhgui的config/config.default.php中，可设置采样命中次数；
+return rand(1, 100) === 42; 为1%的采样率，改成return True;则标识每次都采样
+
+修改nginx配置
+vim /home/work/nginx/nginx/conf/conf.d/coupon.conf
+
+location / {
+
+    ….
+
+    fastcgi_param PHP_VALUE “auto_prepend_file=/home/work/www/xhgui/xhgui-branch-master/external/header.php”;
+
+}
+
+新增加一个单独指向到/home/work/www/xhgui/xhgui-branch-master/webroot目录下的域名配置
+
+访问域名 效果如下
+
+
+
+参考
+tideways 一些参数说明
+
+配置支持的框架
+
+php.ini  tideways.framework=wordpress
+
+要开始采用不同的服务名称收集数据，可以使用三种不同的配置机制之一
+
+php.ini  tideways.service=myservice1
+
+nginx config  TIDEWAYS_SERVICE=myservice1
+
+启用CLI监控
+
+为了向后兼容性原因，默认情况下，在PHP扩展的v4.1中禁用CLI监视。
+
+php.ini  tideways.monitor_cli=1
+
+您应该知道的服务功能有一些限制：
+目前服务的数量限制在10个。在开始增加此值之前，我们要监控该功能的使用方式。这还可以包括后端的配置屏幕，以禁用所选服务的监视。
+
+以下PHP INI配置变量可能会影响采样的工作原理：
+
+tideways.sample_rate 可以修改以收集更多跟踪数据以发送到本地守护程序。
+
+tideways.auto_start 默认为true，并且可以设置为false或0 在运行Web请求时避免启动Tideways。这允许您使用Tideways\Profiler::start()API 以编程方式启动Tideways 。在CLI请求中，您还必须使用此API。
+
+接下来的两个配置变量控制当随机抽样选择开始Tideways的监视或跟踪模式时，Tideways做什么。您可以为两个变量设置一个模式
+
+tideways.monitor用于监控模式，默认为BASIC。
+
+tideways.collect是用于跟踪模式，默认为TRACING。
+
+“DISABLED” 不启用Tideways。
+
+“BASIC” 用于启动监控模式以收集响应时间
+
+“TRACING” 用于启用timline跟踪分析器
+
+“PROFILING” 启用callgraph分析器
+
+“FULL” 用于启用两个Profilers
+
+可以进行以下更改：
+
+您可以禁用监控，只能通过设置来收集踪迹tideways.monitor=disabled。
+
+您可以强制收集呼叫记录跟踪，这些痕迹的开销大大超过了网络负载的50-100％
+tideways.collect=full。守护进程仍然会重新抽取很多的callgraph跟踪，只保留其时间表，因此请确保仅在开发中使用。自己手动收集电话记录痕迹要好得多
